@@ -1,0 +1,154 @@
+# 04ec50d0b755da6e58ae731c
+# 8032079486:AAFynMazqWEonqUrAL76tmtMAmJPRlfLG4Y
+
+import requests
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+
+API_KEY = "04ec50d0b755da6e58ae731c"
+BASE_URL = f"https://v6.exchangerate-api.com/v6/{API_KEY}/latest/"
+
+
+def get_exchange_rate(base_currency, target_currency):
+    try:
+        response = requests.get(BASE_URL + base_currency)
+        data = response.json()
+
+        if response.status_code == 200 and "conversion_rates" in data:
+            return data["conversion_rates"].get(target_currency)
+        else:
+            return None
+    except Exception as e:
+        return None
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    keyboard = [
+        [InlineKeyboardButton("Русский", callback_data="LANG_RU"),
+         InlineKeyboardButton("English", callback_data="LANG_EN")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "Choose your language / Выберите язык:",
+        reply_markup=reply_markup
+    )
+
+
+async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "LANG_RU":
+        context.user_data["language"] = "RU"
+        await query.edit_message_text("Вы выбрали русский язык.")
+        await show_currency_menu(update, context, lang="RU")
+
+    elif query.data == "LANG_EN":
+        context.user_data["language"] = "EN"
+        await query.edit_message_text("You have selected English.")
+        await show_currency_menu(update, context, lang="EN")
+
+
+async def show_currency_menu(update, context, lang):
+    keyboard = [
+        [InlineKeyboardButton("USD -> EUR", callback_data="USD_EUR"),
+         InlineKeyboardButton("EUR -> USD", callback_data="EUR_USD")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if lang == "RU":
+        message = "Выберите направление перевода:"
+
+    else:
+        message = "Select the conversion direction:"
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            message,
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_text(
+            message,
+            reply_markup=reply_markup
+        )
+
+
+async def handle_currency_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "USD_EUR":
+        context.user_data["conversion"] = ("USD", "EUR")
+        lang = context.user_data.get("language", "EN")
+        if lang == "RU":
+            await query.edit_message_text("Вы выбрали перевод USD -> EUR. Введите сумму для перевода:")
+        else:
+            await query.edit_message_text("You selected USD -> EUR. Enter the amount to convert:")
+
+    elif query.data == "EUR_USD":
+        context.user_data["conversion"] = ("EUR", "USD")
+        lang = context.user_data.get("language", "EN")
+        if lang == "RU":
+            await query.edit_message_text("Вы выбрали перевод EUR -> USD. Введите сумму для перевода:")
+        else:
+            await query.edit_message_text("You selected EUR -> USD. Enter the amount to convert:")
+
+
+async def handle_amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if "conversion" not in context.user_data:
+        lang = context.user_data.get("language", "EN")
+        if lang == "RU":
+            await update.message.reply_text("Сначала выберите направление перевода с помощью команды /start.")
+        else:
+            await update.message.reply_text("Please select a conversion direction first using the /start command.")
+        return
+
+    try:
+        amount = float(update.message.text)
+        base_currency, target_currency = context.user_data["conversion"]
+        rate = get_exchange_rate(base_currency, target_currency)
+
+        if rate:
+            converted_amount = amount * rate
+            lang = context.user_data.get("language", "EN")
+            if lang == "RU":
+                await update.message.reply_text(
+                    f"{amount} {base_currency} = {converted_amount:.2f} {target_currency}"
+                )
+            else:
+                await update.message.reply_text(
+                    f"{amount} {base_currency} = {converted_amount:.2f} {target_currency}"
+                )
+        else:
+            lang = context.user_data.get("language", "EN")
+            if lang == "RU":
+                await update.message.reply_text("Не удалось получить курс валют. Попробуйте снова позже.")
+            else:
+                await update.message.reply_text("Failed to fetch the exchange rate. Please try again later.")
+
+        lang = context.user_data.get("language", "EN")
+        await show_currency_menu(update, context, lang=lang)
+
+    except ValueError:
+        lang = context.user_data.get("language", "EN")
+        if lang == "RU":
+            await update.message.reply_text("Пожалуйста, введите корректное число.")
+        else:
+            await update.message.reply_text("Please enter a valid number.")
+
+
+if __name__ == "__main__":
+    app = ApplicationBuilder().token("7862168994:AAFHSg0D4oChFxUZat29y_hHj3gAzuFh2Gk").build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(set_language, pattern="^LANG_.*"))
+    app.add_handler(CallbackQueryHandler(handle_currency_selection, pattern="^(USD_EUR|EUR_USD)$"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_amount_input))
+
+    print("Бот запущен...")
+    app.run_polling()
+
+
